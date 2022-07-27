@@ -1,0 +1,608 @@
+AWSTemplateFormatVersion: "2010-09-09"
+Transform: AWS::Serverless-2016-10-31
+
+Description: GoSports Application
+
+# -----------------------------------------------------------
+Parameters:
+  # EC2
+  EC2InstanceType:
+    Description: Type of EC2 Instance to Launch
+    Type: String
+    AllowedValues:
+      - t2.micro
+      - t2.small
+      - t2.medium
+    Default: t2.micro
+
+  # DynamoDb
+  ReadCapacityUnits:
+    Description: Provisioned read throughput
+    Type: Number
+    Default: 5
+    MinValue: 5
+    MaxValue: 1000
+    ConstraintDescription: must be between 5 and 1000
+
+  WriteCapacityUnits:
+    Description: Provisioned write throughput
+    Type: Number
+    Default: 10
+    MinValue: 5
+    MaxValue: 1000
+    ConstraintDescription: must be between 5 and 1000
+
+  # API Gateway
+  ApiGatewayName:
+    Description: API Gateway Name
+    Type: String
+    Default: GoSports-APIs
+
+  ApiGatewayStageName:
+    Description: API Gateway Stage Name
+    Type: String
+    Default: prod
+
+  # Lambda
+  LambdaTimeout:
+    Description: Maximun Lambda execution time in seconds
+    Type: Number
+    Default: 30
+    MinValue: 5
+    MaxValue: 300
+
+  LambdaMemorySize:
+    Type: String
+    Default: 1024
+    AllowedValues:
+      [512, 576, 640, 704, 768, 832, 896, 960, 1024, 1088, 1152, 1216]
+
+# -----------------------------------------------------------
+Resources:
+  # EC2 Instance
+  GoSportsEC2Instance:
+    Description: GoSports EC2 Instance
+    Type: AWS::EC2::Instance
+    Properties:
+      ImageId: ami-04505e74c0741db8d
+      InstanceType:
+        Ref: EC2InstanceType
+      IamInstanceProfile: arn:aws:iam::251309276379:role/LabRole
+      UserData:
+        Fn::Base64: !Sub |
+          sudo apt-get update 
+          sudo apt-get  install curl
+          sudo apt-get install -y nodejs
+          sudo apt-get install nginx -y
+          sudo apt install python3-pip -y
+          cd /
+          sudo systemctl reload nginx
+          cd /var/www/html/
+          sudo chmod -R o+rw /var/www/html
+          git clone https://github.com/kandarpparikh/AutoConfigure.git
+          cd GoSports
+          npm install
+          npm start
+    DependsOn:
+      - GoSportsAPIGateway
+
+  # DynamoDb Tables
+  UserInfoDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: 111userInfo-GoSports
+      AttributeDefinitions:
+        - AttributeName: Email
+          AttributeType: S
+      KeySchema:
+        - AttributeName: Email
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits:
+          Ref: ReadCapacityUnits
+        WriteCapacityUnits:
+          Ref: WriteCapacityUnits
+
+  EventInfoDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: 111eventInfo-GoSports
+      AttributeDefinitions:
+        - AttributeName: event_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: event_id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits:
+          Ref: ReadCapacityUnits
+        WriteCapacityUnits:
+          Ref: WriteCapacityUnits
+    DependsOn:
+      - UserInfoDynamoDBTable
+
+  BlogInfoDynamoDBTable:
+    Type: AWS::DynamoDB::Table
+    Properties:
+      TableName: 111blogInfo-GoSports
+      AttributeDefinitions:
+        - AttributeName: blog_id
+          AttributeType: S
+      KeySchema:
+        - AttributeName: blog_id
+          KeyType: HASH
+      ProvisionedThroughput:
+        ReadCapacityUnits:
+          Ref: ReadCapacityUnits
+        WriteCapacityUnits:
+          Ref: WriteCapacityUnits
+    DependsOn:
+      - UserInfoDynamoDBTable
+
+  # S3 Bucket
+  PollyS3Bucket:
+    Description: It stores the .mp3 files created by Amazon Polly for text-to-speech conversion.
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: 111gosports-polly
+      AccessControl: PublicReadWrite
+      PublicAccessBlockConfiguration:
+        BlockPublicAcls: false
+        BlockPublicPolicy: false
+        IgnorePublicAcls: false
+        RestrictPublicBuckets: false
+
+  # Lambda Functions
+  AddBlogLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-add-blog.zip
+      FunctionName: 111gosports-add-blog
+      Handler: gosports-add-blog.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - BlogInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  AddEventLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-add-event.zip
+      FunctionName: 111gosports-add-event
+      Handler: gosports-add-event.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - EventInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  BookEventLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-book-event.zip
+      FunctionName: 111gosports-book-event
+      Handler: gosports-book-event.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - EventInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  GetBlogsLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-get-blogs.zip
+      FunctionName: 111gosports-get-blogs
+      Handler: gosports-get-blogs.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - BlogInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  GetBookingsLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-get-bookings.zip
+      FunctionName: 111gosports-get-bookings
+      Handler: gosports-get-bookings.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - EventInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  GetEventsLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-get-events.zip
+      FunctionName: 111gosports-get-events
+      Handler: gosports-get-events.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - EventInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  GetMyBlogsLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-get-my-blogs.zip
+      FunctionName: 111gosports-get-my-blogs
+      Handler: gosports-get-my-blogs.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - BlogInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  GetMyEventsLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-get-my-events.zip
+      FunctionName: 111gosports-get-my-events
+      Handler: gosports-get-my-events.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - EventInfoDynamoDBTable
+      - UserInfoDynamoDBTable
+
+  PollyLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: gosports-polly.zip
+      FunctionName: 111gosports-polly
+      Handler: gosports-polly.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - BlogInfoDynamoDBTable
+      - EventInfoDynamoDBTable
+      - PollyS3Bucket
+
+  UserSignUpLambdaFunction:
+    Type: AWS::Lambda::Function
+    Properties:
+      Code:
+        S3Bucket: gosports-data
+        S3Key: usersignup.zip
+      FunctionName: 111userSignUp
+      Handler: userSignUp.lambda_handler
+      Runtime: python3.9
+      Role: arn:aws:iam::251309276379:role/LabRole
+    DependsOn:
+      - UserInfoDynamoDBTable
+
+  # API Gateway
+  GoSportsAPIGateway:
+    Type: AWS::ApiGateway::RestApi
+    Properties:
+      Name:
+        Ref: ApiGatewayName
+    DependsOn:
+      - AddBlogLambdaFunction
+      - AddEventLambdaFunction
+      - BookEventLambdaFunction
+      - GetBlogsLambdaFunction
+      - GetBookingsLambdaFunction
+      - GetEventsLambdaFunction
+      - GetMyBlogsLambdaFunction
+      - GetMyEventsLambdaFunction
+      - PollyLambdaFunction
+
+  # API Gateway Resources
+  BlogsAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId: !GetAtt
+        - GoSportsAPIGateway
+        - RootResourceId
+      PathPart: blogs
+    DependsOn:
+      - GoSportsAPIGateway
+
+  EventsAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId: !GetAtt
+        - GoSportsAPIGateway
+        - RootResourceId
+      PathPart: events
+    DependsOn:
+      - GoSportsAPIGateway
+
+  MyBlogsAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId: !GetAtt
+        - GoSportsAPIGateway
+        - RootResourceId
+      PathPart: myblogs
+    DependsOn:
+      - GoSportsAPIGateway
+
+  MyEventsAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId: !GetAtt
+        - GoSportsAPIGateway
+        - RootResourceId
+      PathPart: myevents
+    DependsOn:
+      - GoSportsAPIGateway
+
+  # Nested API Gateway Resources
+  AddBlogAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId:
+        Ref: BlogsAPIGatewayResource
+      PathPart: add
+
+  AllBlogsAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId:
+        Ref: BlogsAPIGatewayResource
+      PathPart: all
+
+  AddEventAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId:
+        Ref: EventsAPIGatewayResource
+      PathPart: add
+
+  AllEventsAPIGatewayResource:
+    Type: AWS::ApiGateway::Resource
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ParentId:
+        Ref: EventsAPIGatewayResource
+      PathPart: all
+
+  # API Gateway Methods
+  AddBlogAPIGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ResourceId:
+        Ref: AddBlogAPIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddBlogLambdaFunction.Arn}/invocations
+          - LambdaFuncNameArn: !GetAtt AddBlogLambdaFunction.Arn
+    DependsOn:
+      - AddBlogAPIGatewayResource
+
+  AddEventAPIGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ResourceId:
+        Ref: AddEventAPIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${AddEventLambdaFunction.Arn}/invocations
+          - LambdaFuncNameArn: !GetAtt AddEventLambdaFunction.Arn
+    DependsOn:
+      - AddEventAPIGatewayResource
+
+  AllEventsAPIGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ResourceId:
+        Ref: AllEventsAPIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetEventsLambdaFunction.Arn}/invocations
+          - LambdaFuncNameArn: !GetAtt GetEventsLambdaFunction.Arn
+    DependsOn:
+      - AllEventsAPIGatewayResource
+
+  AllBlogsAPIGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ResourceId:
+        Ref: AllBlogsAPIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetBlogsLambdaFunction.Arn}/invocations
+          - LambdaFuncNameArn: !GetAtt GetBlogsLambdaFunction.Arn
+    DependsOn:
+      - AllBlogsAPIGatewayResource
+
+  MyBlogsAPIGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ResourceId:
+        Ref: MyBlogsAPIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetMyBlogsLambdaFunction.Arn}/invocations
+          - LambdaFuncNameArn: !GetAtt GetMyBlogsLambdaFunction.Arn
+    DependsOn:
+      - MyBlogsAPIGatewayResource
+
+  MyEventsAPIGatewayMethod:
+    Type: AWS::ApiGateway::Method
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      ResourceId:
+        Ref: MyEventsAPIGatewayResource
+      HttpMethod: POST
+      AuthorizationType: NONE
+      MethodResponses:
+        - StatusCode: 200
+      Integration:
+        Type: AWS_PROXY
+        IntegrationResponses:
+          - StatusCode: 200
+        IntegrationHttpMethod: POST
+        Uri: !Sub
+          - >-
+            arn:aws:apigateway:${AWS::Region}:lambda:path/2015-03-31/functions/${GetMyEventsLambdaFunction.Arn}/invocations
+          - LambdaFuncNameArn: !GetAtt GetMyBlogsLambdaFunction.Arn
+    DependsOn:
+      - MyEventsAPIGatewayResource
+
+  # API Gateway Deployment
+  APIGatewayDeployment:
+    Type: AWS::ApiGateway::Deployment
+    Properties:
+      RestApiId:
+        Ref: GoSportsAPIGateway
+      StageName:
+        Ref: ApiGatewayStageName
+    DependsOn:
+      - AddBlogAPIGatewayMethod
+      - AddEventAPIGatewayMethod
+      - AllEventsAPIGatewayMethod
+
+  # Cognito
+  CognitoUserPool:
+    Type: "AWS::Cognito::UserPool"
+    Properties:
+      UserPoolName: go-sports-users
+      Policies:
+        PasswordPolicy:
+          MinimumLength: 6
+          RequireUppercase: false
+          RequireLowercase: true
+          RequireNumbers: true
+          RequireSymbols: false
+          TemporaryPasswordValidityDays: 7
+      AutoVerifiedAttributes:
+        - email
+      UsernameAttributes:
+        - email
+      EmailConfiguration:
+        EmailSendingAccount: COGNITO_DEFAULT
+      AdminCreateUserConfig:
+        AllowAdminCreateUserOnly: false
+      AccountRecoverySetting:
+        RecoveryMechanisms:
+          - Priority: 1
+            Name: verified_email
+          - Priority: 2
+            Name: verified_phone_number
+      UsernameConfiguration:
+        CaseSensitive: false
+      VerificationMessageTemplate:
+        DefaultEmailOption: CONFIRM_WITH_CODE
+
+  CognitoUserPoolClient:
+    Type: "AWS::Cognito::UserPoolClient"
+    Properties:
+      ClientName: go-sports-ui
+      GenerateSecret: false
+      RefreshTokenValidity: 7
+      ExplicitAuthFlows:
+        - ALLOW_REFRESH_TOKEN_AUTH
+        - ALLOW_USER_SRP_AUTH
+      PreventUserExistenceErrors: ENABLED
+      UserPoolId:
+        Ref: CognitoUserPool
+
+  CognitoIdentityPool:
+    Type: "AWS::Cognito::IdentityPool"
+    Properties:
+      IdentityPoolName: nuxt-cognito-id-pool
+      AllowUnauthenticatedIdentities: true
+      CognitoIdentityProviders:
+        - ClientId: !Ref CognitoUserPoolClient
+          ProviderName: !Join
+            - ""
+            - - cognito-idp.
+              - !Ref "AWS::Region"
+              - .amazonaws.com/
+              - !Ref CognitoUserPool

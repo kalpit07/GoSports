@@ -1,0 +1,29 @@
+input[type=date]:required:invalid::-webkit-datetime-edit {
+    color: transparent;
+}
+input[type=date]:focus::-webkit-datetime-edit {
+    color: black !important;
+}
+
+input[type=file]:required:invalid::-webkit-datetime-edit {
+    color: transparent;
+}
+input[type=file]:focus::-webkit-datetime-edit {
+    color: black !important;
+}
+input[type=file]{
+    float: right;
+}
+
+ input[type="file"]{
+    text-align: left;
+    -webkit-rtl-ordering:  right;
+ }
+
+ input[type=file]::-webkit-file-upload-button {
+    width: 0;
+    padding: 0;
+    margin: 0;
+
+    border: none;
+     }
